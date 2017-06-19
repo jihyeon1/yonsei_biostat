@@ -1,0 +1,733 @@
+##b0 : log(0.015) & landmark : 5,7##
+
+N<-200000
+t<-10
+seed<-54321
+set.seed(seed)
+lambda<-log(1-0.0105)/(-7)
+d<-10000
+library(survival)
+library(data.table)
+
+
+beta0<-log(0.015)
+
+beta1<-log(1)
+beta2<-log(0.95)
+beta3<-log(0.90)
+land1<-5
+land2<-7
+
+
+low_q<-0.943
+high_q<-2.174
+
+i<-1
+
+mat1<-matrix(0,nrow=100,ncol=9)
+mat2<-matrix(0,nrow=100,ncol=3)
+mat3<-matrix(0,nrow=100,ncol=9)
+mat4<-matrix(0,nrow=100,ncol=3)
+mat5<-matrix(0,nrow=100,ncol=9)
+mat6<-matrix(0,nrow=100,ncol=3)
+mat7<-matrix(0,nrow=100,ncol=9)
+mat8<-matrix(0,nrow=100,ncol=3)
+mat_land5<-matrix(0, nrow=100, ncol=4)
+mat_land7<-matrix(0, nrow=100, ncol=4)
+
+while(i<=100){
+  
+  
+  # starting point generate #
+  
+  id<-rep(1:N, each=10)
+  
+  u<-runif(d,0,t)
+  ui<-c(u,rep(NA,N-d))
+  zi<-c(rep(1,d),rep(0,N-d))
+  
+  ui_discrete<-rep(ui, each=10)
+  zi_discrete<-rep(zi, each=10)
+  
+  start<-rep(c(0:9), N)
+  stop<-start+1
+  
+  cum_dose<-ifelse(ui_discrete<stop & !is.na(ui_discrete), (stop-ui_discrete)*0.5, 0)
+  
+  
+  A1<-ifelse(cum_dose<low_q & cum_dose>0,1,0)
+  A2<-ifelse(cum_dose>=low_q & cum_dose<high_q,1,0)
+  A3<-ifelse(cum_dose>=high_q,1,0)
+  
+  P0_t<-exp(beta0)/(1+exp(beta0))
+  P1_t<-exp(beta0+beta1)/(1+exp(beta0+beta1))
+  P2_t<-exp(beta0+beta1+beta2)/(1+exp(beta0+beta1+beta2))
+  P3_t<-exp(beta0+beta1+beta2+beta3)/(1+exp(beta0+beta1+beta2+beta3))
+  
+  data<-cbind(id,start, stop, ui_discrete,zi_discrete,cum_dose,A1,A2,A3)
+  data_0<-subset(data, A1==0 & A2==0 & A3==0)
+  data_1<-subset(data, A1==1)
+  data_2<-subset(data, A2==1)
+  data_3<-subset(data, A3==1)
+  
+  
+  yi_data_0<-rbinom(nrow(data_0),1,P0_t)
+  yi_data_1<-rbinom(nrow(data_1),1,P1_t)
+  yi_data_2<-rbinom(nrow(data_2),1,P2_t)
+  yi_data_3<-rbinom(nrow(data_3),1,P3_t)
+  
+  data_00<-cbind(data_0, yi_data_0)
+  data_11<-cbind(data_1, yi_data_1)
+  data_22<-cbind(data_2, yi_data_2)
+  data_33<-cbind(data_3, yi_data_3)
+  colnames(data_00)<-c("id", "start", "stop", "ui_discrete", "zi_discrete","cum_dose", "A1", "A2", "A3", "yi")
+  colnames(data_11)<-c("id", "start", "stop", "ui_discrete", "zi_discrete","cum_dose", "A1", "A2", "A3", "yi")
+  colnames(data_22)<-c("id", "start", "stop", "ui_discrete", "zi_discrete","cum_dose", "A1", "A2", "A3", "yi")
+  colnames(data_33)<-c("id", "start", "stop", "ui_discrete", "zi_discrete","cum_dose", "A1", "A2", "A3", "yi")
+  
+  
+  data_all<-rbind(data_00,data_11, data_22, data_33)
+  data_all_sort<-data_all[order(data_all[,1], data_all[,2]),]
+  
+  
+  multi<-data_all_sort[,3]*data_all_sort[,10]
+  data_all_multi<-cbind(data_all_sort,multi)
+  
+  data_all_multi_table<-data.table(data_all_multi)
+  data_all_multi_table_cum<-data_all_multi_table[, Cum.Sum := cumsum(multi), by=data_all_multi_table[,1]]
+  data_all_multi_table_cum<-as.data.frame(data_all_multi_table_cum)
+  
+  
+  
+  data_final_dep<-data_all_multi_table_cum[data_all_multi_table_cum[,11]==data_all_multi_table_cum[,12],]
+  
+  #time-dep final data :data_final_dep#
+  data_final_dep[,5]<-ifelse(data_final_dep[,4]<=data_final_dep[,3],1,0)
+  data_final_dep[,5][is.na(data_final_dep[,5])] <- 0
+  
+  
+  #cox-data : cox_data_last#
+  cox_data<-data_final_dep
+  cox_data_last<-aggregate(cox_data[,1:12],by=list(cox_data[,1]),FUN=tail, n=1)
+  cox_data_last[,12]<-ifelse(cox_data_last[,12]==0,10, cox_data_last[,12])
+  
+  
+  
+  
+  #landmark data : land_data5 & land_data7#
+  
+  land_data5<-cox_data_last
+  land_data5<-land_data5[!(land_data5[,12]<land1),]
+  land_data5[,6]<-ifelse(land_data5[,5]<=land1 & !is.na(land_data5[,5]) ,1,0) 
+  land_data5[,7]<-ifelse(land_data5[,6]==1 & !is.na(land_data5[,5]) ,(land1-land_data5[,5])*0.5,0)
+  
+  land_data5[,8]<-ifelse(land_data5[,7]<low_q & land_data5[,7]>0,1,0)
+  land_data5[,9]<-ifelse(land_data5[,7]>=low_q & land_data5[,7]<high_q,1,0)
+  land_data5[,10]<-ifelse(land_data5[,7]>=high_q,1,0)
+  
+  
+  land_data7<-cox_data_last
+  land_data7<-land_data7[!(land_data7[,12]<land2),]
+  land_data7[,6]<-ifelse(land_data7[,5]<=land2 & !is.na(land_data7[,5]) ,1,0) 
+  land_data7[,7]<-ifelse(land_data7[,6]==1 & !is.na(land_data7[,5]) ,(land2-land_data7[,5])*0.5,0)
+  
+  land_data7[,8]<-ifelse(land_data7[,7]<low_q & land_data7[,7]>0,1,0)
+  land_data7[,9]<-ifelse(land_data7[,7]>=low_q & land_data7[,7]<high_q,1,0)
+  land_data7[,10]<-ifelse(land_data7[,7]>=high_q,1,0)
+  
+  
+  cox_data_last<-as.data.frame(cox_data_last)
+  data_final_dep<-as.data.frame(data_final_dep)
+  land_data5<-as.data.frame(land_data5)
+  land_data7<-as.data.frame(land_data7)
+  
+  #cox_cum#
+  fit_cox_cum<-coxph(Surv(multi,yi)~A1+A2+A3,data=cox_data_last)
+  #cox_exposure#
+  fit_cox_exp<-coxph(Surv(multi,yi)~zi_discrete,data=cox_data_last)
+  
+  
+  #time-dep cox_cum#
+  fit_dep_cum<-coxph(Surv(start,stop,yi)~A1+A2+A3,data=data_final_dep)
+  #time-dep cox_exposure#
+  fit_dep_exp<-coxph(Surv(start,stop,yi)~zi_discrete,data=data_final_dep)
+  
+  #landmark5#
+  
+  #landmark_cum#
+  fit_land_cum5<-coxph(Surv(multi,yi)~A1+A2+A3,data=land_data5)
+  #cox_exposure#
+  fit_land_exp5<-coxph(Surv(multi,yi)~zi_discrete,data=land_data5)
+  
+  #landmark7#
+  
+  #landmark_cum#
+  fit_land_cum7<-coxph(Surv(multi,yi)~A1+A2+A3,data=land_data7)
+  #cox_exposure#
+  fit_land_exp7<-coxph(Surv(multi,yi)~zi_discrete,data=land_data7)
+  
+  
+  
+  coeffs1 <- coef(summary(fit_cox_cum))
+  coeffs2<- coef(summary(fit_cox_exp))
+  coeffs3 <- coef(summary(fit_dep_cum))
+  coeffs4 <- coef(summary(fit_dep_exp))
+  coeffs5 <- coef(summary(fit_land_cum5))
+  coeffs6 <- coef(summary(fit_land_exp5))
+  coeffs7 <- coef(summary(fit_land_cum7))
+  coeffs8 <- coef(summary(fit_land_exp7))
+  
+  g1.value1<-c(coeffs1[1,5],coeffs1[1,1],coeffs1[1,2])
+  g2.value1<-c(coeffs1[2,5],coeffs1[2,1],coeffs1[2,2])
+  g3.value1<-c(coeffs1[3,5],coeffs1[3,1],coeffs1[3,2])
+  
+  g1.value2<-c(coeffs2[1,5],coeffs2[1,1],coeffs2[1,2])
+  
+  g1.value3<-c(coeffs3[1,5],coeffs3[1,1],coeffs3[1,2])
+  g2.value3<-c(coeffs3[2,5],coeffs3[2,1],coeffs3[2,2])
+  g3.value3<-c(coeffs3[3,5],coeffs3[3,1],coeffs3[3,2])
+  
+  g1.value4<-c(coeffs4[1,5],coeffs4[1,1],coeffs4[1,2])
+  
+  g1.value5<-c(coeffs5[1,5],coeffs5[1,1],coeffs5[1,2])
+  g2.value5<-c(coeffs5[2,5],coeffs5[2,1],coeffs5[2,2])
+  g3.value5<-c(coeffs5[3,5],coeffs5[3,1],coeffs5[3,2])
+  
+  g1.value6<-c(coeffs6[1,5],coeffs6[1,1],coeffs6[1,2])
+  
+  g1.value7<-c(coeffs7[1,5],coeffs7[1,1],coeffs7[1,2])
+  g2.value7<-c(coeffs7[2,5],coeffs7[2,1],coeffs7[2,2])
+  g3.value7<-c(coeffs7[3,5],coeffs7[3,1],coeffs7[3,2])
+  
+  g1.value8<-c(coeffs8[1,5],coeffs8[1,1],coeffs8[1,2])
+  
+  land_n1_5<-nrow(land_data5[land_data5$A1==1,])
+  land_n2_5<-nrow(land_data5[land_data5$A2==1,])
+  land_n3_5<-nrow(land_data5[land_data5$A3==1,])
+  land_n0_5<-nrow(land_data5[land_data5$A1==0 & land_data5$A2==0 & land_data5$A3==0,])
+  
+  land_n1_7<-nrow(land_data7[land_data7$A1==1,])
+  land_n2_7<-nrow(land_data7[land_data7$A2==1,])
+  land_n3_7<-nrow(land_data7[land_data7$A3==1,])
+  land_n0_7<-nrow(land_data7[land_data7$A1==0 & land_data7$A2==0 & land_data7$A3==0,])
+  
+  mat1[i,]<-c(g1.value1,g2.value1,g3.value1)
+  mat2[i,]<-c(g1.value2)
+  mat3[i,]<-c(g1.value3,g2.value3,g3.value3)
+  mat4[i,]<-c(g1.value4)
+  
+  mat5[i,]<-c(g1.value5,g2.value5,g3.value5)
+  mat6[i,]<-c(g1.value6)
+  
+  mat7[i,]<-c(g1.value7,g2.value7,g3.value7)
+  mat8[i,]<-c(g1.value8)
+  
+  
+  
+  mat_land5[i,]<-c(land_n1_5,land_n2_5,land_n3_5,land_n0_5)
+  mat_land7[i,]<-c(land_n1_7,land_n2_7,land_n3_7,land_n0_7)
+  
+  i<-i+1
+  
+}
+
+write.csv(mat1, "E:\\simul_aspirin_170124\\setting1_alternative\\cox_cum_170124.csv")
+write.csv(mat2, "E:\\simul_aspirin_170124\\setting1_alternative\\cox_exp_170124.csv")
+write.csv(mat3, "E:\\simul_aspirin_170124\\setting1_alternative\\dep_cum_170124.csv")
+write.csv(mat4, "E:\\simul_aspirin_170124\\setting1_alternative\\dep_exp_170124.csv")
+write.csv(mat5, "E:\\simul_aspirin_170124\\setting1_alternative\\land_cum_5_170124.csv")
+write.csv(mat6, "E:\\simul_aspirin_170124\\setting1_alternative\\land_exp_5_170124.csv")
+write.csv(mat7, "E:\\simul_aspirin_170124\\setting1_alternative\\land_cum_7_170124.csv")
+write.csv(mat8, "E:\\simul_aspirin_170124\\setting1_alternative\\land_exp_7_170124.csv")
+write.csv(mat_land5, "E:\\simul_aspirin_170124\\setting1_alternative\\n_land_5_170124.csv")
+write.csv(mat_land7, "E:\\simul_aspirin_170124\\setting1_alternative\\n_land_7_170124.csv")
+
+
+##b0 : log(5*0.015) & landmark : 5,7##
+
+N<-200000
+t<-10
+seed<-54321
+set.seed(seed)
+lambda<-log(1-0.0105)/(-7)
+d<-10000
+library(survival)
+library(data.table)
+
+beta0<-log(5*0.015)
+
+beta1<-log(1)
+beta2<-log(0.95)
+beta3<-log(0.90)
+land1<-5
+land2<-7
+
+
+low_q<-0.943
+high_q<-2.174
+
+i<-1
+
+mat1<-matrix(0,nrow=100,ncol=9)
+mat2<-matrix(0,nrow=100,ncol=3)
+mat3<-matrix(0,nrow=100,ncol=9)
+mat4<-matrix(0,nrow=100,ncol=3)
+mat5<-matrix(0,nrow=100,ncol=9)
+mat6<-matrix(0,nrow=100,ncol=3)
+mat7<-matrix(0,nrow=100,ncol=9)
+mat8<-matrix(0,nrow=100,ncol=3)
+mat_land5<-matrix(0, nrow=100, ncol=4)
+mat_land7<-matrix(0, nrow=100, ncol=4)
+
+while(i<=100){
+  
+  
+  # starting point generate #
+  
+  id<-rep(1:N, each=10)
+  
+  u<-runif(d,0,t)
+  ui<-c(u,rep(NA,N-d))
+  zi<-c(rep(1,d),rep(0,N-d))
+  
+  ui_discrete<-rep(ui, each=10)
+  zi_discrete<-rep(zi, each=10)
+  
+  start<-rep(c(0:9), N)
+  stop<-start+1
+  
+  cum_dose<-ifelse(ui_discrete<stop & !is.na(ui_discrete), (stop-ui_discrete)*0.5, 0)
+  
+  
+  A1<-ifelse(cum_dose<low_q & cum_dose>0,1,0)
+  A2<-ifelse(cum_dose>=low_q & cum_dose<high_q,1,0)
+  A3<-ifelse(cum_dose>=high_q,1,0)
+  
+  P0_t<-exp(beta0)/(1+exp(beta0))
+  P1_t<-exp(beta0+beta1)/(1+exp(beta0+beta1))
+  P2_t<-exp(beta0+beta1+beta2)/(1+exp(beta0+beta1+beta2))
+  P3_t<-exp(beta0+beta1+beta2+beta3)/(1+exp(beta0+beta1+beta2+beta3))
+  
+  data<-cbind(id,start, stop, ui_discrete,zi_discrete,cum_dose,A1,A2,A3)
+  data_0<-subset(data, A1==0 & A2==0 & A3==0)
+  data_1<-subset(data, A1==1)
+  data_2<-subset(data, A2==1)
+  data_3<-subset(data, A3==1)
+  
+  
+  yi_data_0<-rbinom(nrow(data_0),1,P0_t)
+  yi_data_1<-rbinom(nrow(data_1),1,P1_t)
+  yi_data_2<-rbinom(nrow(data_2),1,P2_t)
+  yi_data_3<-rbinom(nrow(data_3),1,P3_t)
+  
+  data_00<-cbind(data_0, yi_data_0)
+  data_11<-cbind(data_1, yi_data_1)
+  data_22<-cbind(data_2, yi_data_2)
+  data_33<-cbind(data_3, yi_data_3)
+  colnames(data_00)<-c("id", "start", "stop", "ui_discrete", "zi_discrete","cum_dose", "A1", "A2", "A3", "yi")
+  colnames(data_11)<-c("id", "start", "stop", "ui_discrete", "zi_discrete","cum_dose", "A1", "A2", "A3", "yi")
+  colnames(data_22)<-c("id", "start", "stop", "ui_discrete", "zi_discrete","cum_dose", "A1", "A2", "A3", "yi")
+  colnames(data_33)<-c("id", "start", "stop", "ui_discrete", "zi_discrete","cum_dose", "A1", "A2", "A3", "yi")
+  
+  
+  data_all<-rbind(data_00,data_11, data_22, data_33)
+  data_all_sort<-data_all[order(data_all[,1], data_all[,2]),]
+  
+  
+  multi<-data_all_sort[,3]*data_all_sort[,10]
+  data_all_multi<-cbind(data_all_sort,multi)
+  
+  data_all_multi_table<-data.table(data_all_multi)
+  data_all_multi_table_cum<-data_all_multi_table[, Cum.Sum := cumsum(multi), by=data_all_multi_table[,1]]
+  data_all_multi_table_cum<-as.data.frame(data_all_multi_table_cum)
+  
+  
+  
+  data_final_dep<-data_all_multi_table_cum[data_all_multi_table_cum[,11]==data_all_multi_table_cum[,12],]
+  
+  #time-dep final data :data_final_dep#
+  data_final_dep[,5]<-ifelse(data_final_dep[,4]<=data_final_dep[,3],1,0)
+  data_final_dep[,5][is.na(data_final_dep[,5])] <- 0
+  
+  
+  #cox-data : cox_data_last#
+  cox_data<-data_final_dep
+  cox_data_last<-aggregate(cox_data[,1:12],by=list(cox_data[,1]),FUN=tail, n=1)
+  cox_data_last[,12]<-ifelse(cox_data_last[,12]==0,10, cox_data_last[,12])
+  
+  
+  
+  
+  #landmark data : land_data5 & land_data7#
+  
+  land_data5<-cox_data_last
+  land_data5<-land_data5[!(land_data5[,12]<land1),]
+  land_data5[,6]<-ifelse(land_data5[,5]<=land1 & !is.na(land_data5[,5]) ,1,0) 
+  land_data5[,7]<-ifelse(land_data5[,6]==1 & !is.na(land_data5[,5]) ,(land1-land_data5[,5])*0.5,0)
+  
+  land_data5[,8]<-ifelse(land_data5[,7]<low_q & land_data5[,7]>0,1,0)
+  land_data5[,9]<-ifelse(land_data5[,7]>=low_q & land_data5[,7]<high_q,1,0)
+  land_data5[,10]<-ifelse(land_data5[,7]>=high_q,1,0)
+  
+  
+  land_data7<-cox_data_last
+  land_data7<-land_data7[!(land_data7[,12]<land2),]
+  land_data7[,6]<-ifelse(land_data7[,5]<=land2 & !is.na(land_data7[,5]) ,1,0) 
+  land_data7[,7]<-ifelse(land_data7[,6]==1 & !is.na(land_data7[,5]) ,(land2-land_data7[,5])*0.5,0)
+  
+  land_data7[,8]<-ifelse(land_data7[,7]<low_q & land_data7[,7]>0,1,0)
+  land_data7[,9]<-ifelse(land_data7[,7]>=low_q & land_data7[,7]<high_q,1,0)
+  land_data7[,10]<-ifelse(land_data7[,7]>=high_q,1,0)
+  
+  
+  cox_data_last<-as.data.frame(cox_data_last)
+  data_final_dep<-as.data.frame(data_final_dep)
+  land_data5<-as.data.frame(land_data5)
+  land_data7<-as.data.frame(land_data7)
+  
+  #cox_cum#
+  fit_cox_cum<-coxph(Surv(multi,yi)~A1+A2+A3,data=cox_data_last)
+  #cox_exposure#
+  fit_cox_exp<-coxph(Surv(multi,yi)~zi_discrete,data=cox_data_last)
+  
+  
+  #time-dep cox_cum#
+  fit_dep_cum<-coxph(Surv(start,stop,yi)~A1+A2+A3,data=data_final_dep)
+  #time-dep cox_exposure#
+  fit_dep_exp<-coxph(Surv(start,stop,yi)~zi_discrete,data=data_final_dep)
+  
+  #landmark5#
+  
+  #landmark_cum#
+  fit_land_cum5<-coxph(Surv(multi,yi)~A1+A2+A3,data=land_data5)
+  #cox_exposure#
+  fit_land_exp5<-coxph(Surv(multi,yi)~zi_discrete,data=land_data5)
+  
+  #landmark7#
+  
+  #landmark_cum#
+  fit_land_cum7<-coxph(Surv(multi,yi)~A1+A2+A3,data=land_data7)
+  #cox_exposure#
+  fit_land_exp7<-coxph(Surv(multi,yi)~zi_discrete,data=land_data7)
+  
+  
+  
+  coeffs1 <- coef(summary(fit_cox_cum))
+  coeffs2<- coef(summary(fit_cox_exp))
+  coeffs3 <- coef(summary(fit_dep_cum))
+  coeffs4 <- coef(summary(fit_dep_exp))
+  coeffs5 <- coef(summary(fit_land_cum5))
+  coeffs6 <- coef(summary(fit_land_exp5))
+  coeffs7 <- coef(summary(fit_land_cum7))
+  coeffs8 <- coef(summary(fit_land_exp7))
+  
+  g1.value1<-c(coeffs1[1,5],coeffs1[1,1],coeffs1[1,2])
+  g2.value1<-c(coeffs1[2,5],coeffs1[2,1],coeffs1[2,2])
+  g3.value1<-c(coeffs1[3,5],coeffs1[3,1],coeffs1[3,2])
+  
+  g1.value2<-c(coeffs2[1,5],coeffs2[1,1],coeffs2[1,2])
+  
+  g1.value3<-c(coeffs3[1,5],coeffs3[1,1],coeffs3[1,2])
+  g2.value3<-c(coeffs3[2,5],coeffs3[2,1],coeffs3[2,2])
+  g3.value3<-c(coeffs3[3,5],coeffs3[3,1],coeffs3[3,2])
+  
+  g1.value4<-c(coeffs4[1,5],coeffs4[1,1],coeffs4[1,2])
+  
+  g1.value5<-c(coeffs5[1,5],coeffs5[1,1],coeffs5[1,2])
+  g2.value5<-c(coeffs5[2,5],coeffs5[2,1],coeffs5[2,2])
+  g3.value5<-c(coeffs5[3,5],coeffs5[3,1],coeffs5[3,2])
+  
+  g1.value6<-c(coeffs6[1,5],coeffs6[1,1],coeffs6[1,2])
+  
+  g1.value7<-c(coeffs7[1,5],coeffs7[1,1],coeffs7[1,2])
+  g2.value7<-c(coeffs7[2,5],coeffs7[2,1],coeffs7[2,2])
+  g3.value7<-c(coeffs7[3,5],coeffs7[3,1],coeffs7[3,2])
+  
+  g1.value8<-c(coeffs8[1,5],coeffs8[1,1],coeffs8[1,2])
+  
+  land_n1_5<-nrow(land_data5[land_data5$A1==1,])
+  land_n2_5<-nrow(land_data5[land_data5$A2==1,])
+  land_n3_5<-nrow(land_data5[land_data5$A3==1,])
+  land_n0_5<-nrow(land_data5[land_data5$A1==0 & land_data5$A2==0 & land_data5$A3==0,])
+  
+  land_n1_7<-nrow(land_data7[land_data7$A1==1,])
+  land_n2_7<-nrow(land_data7[land_data7$A2==1,])
+  land_n3_7<-nrow(land_data7[land_data7$A3==1,])
+  land_n0_7<-nrow(land_data7[land_data7$A1==0 & land_data7$A2==0 & land_data7$A3==0,])
+  
+  mat1[i,]<-c(g1.value1,g2.value1,g3.value1)
+  mat2[i,]<-c(g1.value2)
+  mat3[i,]<-c(g1.value3,g2.value3,g3.value3)
+  mat4[i,]<-c(g1.value4)
+  
+  mat5[i,]<-c(g1.value5,g2.value5,g3.value5)
+  mat6[i,]<-c(g1.value6)
+  
+  mat7[i,]<-c(g1.value7,g2.value7,g3.value7)
+  mat8[i,]<-c(g1.value8)
+  
+  
+  
+  mat_land5[i,]<-c(land_n1_5,land_n2_5,land_n3_5,land_n0_5)
+  mat_land7[i,]<-c(land_n1_7,land_n2_7,land_n3_7,land_n0_7)
+  
+  i<-i+1
+  
+}
+
+write.csv(mat1, "E:\\simul_aspirin_170124\\setting2_alternative\\cox_cum_170124.csv")
+write.csv(mat2, "E:\\simul_aspirin_170124\\setting2_alternative\\cox_exp_170124.csv")
+write.csv(mat3, "E:\\simul_aspirin_170124\\setting2_alternative\\dep_cum_170124.csv")
+write.csv(mat4, "E:\\simul_aspirin_170124\\setting2_alternative\\dep_exp_170124.csv")
+write.csv(mat5, "E:\\simul_aspirin_170124\\setting2_alternative\\land_cum_5_170124.csv")
+write.csv(mat6, "E:\\simul_aspirin_170124\\setting2_alternative\\land_exp_5_170124.csv")
+write.csv(mat7, "E:\\simul_aspirin_170124\\setting2_alternative\\land_cum_7_170124.csv")
+write.csv(mat8, "E:\\simul_aspirin_170124\\setting2_alternative\\land_exp_7_170124.csv")
+write.csv(mat_land5, "E:\\simul_aspirin_170124\\setting2_alternative\\n_land_5_170124.csv")
+write.csv(mat_land7, "E:\\simul_aspirin_170124\\setting2_alternative\\n_land_7_170124.csv")
+
+
+
+
+##b0 : log(10*0.015) & landmark : 5,7##
+
+N<-200000
+t<-10
+seed<-54321
+set.seed(seed)
+lambda<-log(1-0.0105)/(-7)
+d<-10000
+library(survival)
+library(data.table)
+
+beta0<-log(10*0.015)
+
+beta1<-log(1)
+beta2<-log(0.95)
+beta3<-log(0.90)
+land1<-5
+land2<-7
+
+
+low_q<-0.943
+high_q<-2.174
+
+i<-1
+
+mat1<-matrix(0,nrow=100,ncol=9)
+mat2<-matrix(0,nrow=100,ncol=3)
+mat3<-matrix(0,nrow=100,ncol=9)
+mat4<-matrix(0,nrow=100,ncol=3)
+mat5<-matrix(0,nrow=100,ncol=9)
+mat6<-matrix(0,nrow=100,ncol=3)
+mat7<-matrix(0,nrow=100,ncol=9)
+mat8<-matrix(0,nrow=100,ncol=3)
+mat_land5<-matrix(0, nrow=100, ncol=4)
+mat_land7<-matrix(0, nrow=100, ncol=4)
+
+while(i<=100){
+  
+  
+  # starting point generate #
+  
+  id<-rep(1:N, each=10)
+  
+  u<-runif(d,0,t)
+  ui<-c(u,rep(NA,N-d))
+  zi<-c(rep(1,d),rep(0,N-d))
+  
+  ui_discrete<-rep(ui, each=10)
+  zi_discrete<-rep(zi, each=10)
+  
+  start<-rep(c(0:9), N)
+  stop<-start+1
+  
+  cum_dose<-ifelse(ui_discrete<stop & !is.na(ui_discrete), (stop-ui_discrete)*0.5, 0)
+  
+  
+  A1<-ifelse(cum_dose<low_q & cum_dose>0,1,0)
+  A2<-ifelse(cum_dose>=low_q & cum_dose<high_q,1,0)
+  A3<-ifelse(cum_dose>=high_q,1,0)
+  
+  P0_t<-exp(beta0)/(1+exp(beta0))
+  P1_t<-exp(beta0+beta1)/(1+exp(beta0+beta1))
+  P2_t<-exp(beta0+beta1+beta2)/(1+exp(beta0+beta1+beta2))
+  P3_t<-exp(beta0+beta1+beta2+beta3)/(1+exp(beta0+beta1+beta2+beta3))
+  
+  data<-cbind(id,start, stop, ui_discrete,zi_discrete,cum_dose,A1,A2,A3)
+  data_0<-subset(data, A1==0 & A2==0 & A3==0)
+  data_1<-subset(data, A1==1)
+  data_2<-subset(data, A2==1)
+  data_3<-subset(data, A3==1)
+  
+  
+  yi_data_0<-rbinom(nrow(data_0),1,P0_t)
+  yi_data_1<-rbinom(nrow(data_1),1,P1_t)
+  yi_data_2<-rbinom(nrow(data_2),1,P2_t)
+  yi_data_3<-rbinom(nrow(data_3),1,P3_t)
+  
+  data_00<-cbind(data_0, yi_data_0)
+  data_11<-cbind(data_1, yi_data_1)
+  data_22<-cbind(data_2, yi_data_2)
+  data_33<-cbind(data_3, yi_data_3)
+  colnames(data_00)<-c("id", "start", "stop", "ui_discrete", "zi_discrete","cum_dose", "A1", "A2", "A3", "yi")
+  colnames(data_11)<-c("id", "start", "stop", "ui_discrete", "zi_discrete","cum_dose", "A1", "A2", "A3", "yi")
+  colnames(data_22)<-c("id", "start", "stop", "ui_discrete", "zi_discrete","cum_dose", "A1", "A2", "A3", "yi")
+  colnames(data_33)<-c("id", "start", "stop", "ui_discrete", "zi_discrete","cum_dose", "A1", "A2", "A3", "yi")
+  
+  
+  data_all<-rbind(data_00,data_11, data_22, data_33)
+  data_all_sort<-data_all[order(data_all[,1], data_all[,2]),]
+  
+  
+  multi<-data_all_sort[,3]*data_all_sort[,10]
+  data_all_multi<-cbind(data_all_sort,multi)
+  
+  data_all_multi_table<-data.table(data_all_multi)
+  data_all_multi_table_cum<-data_all_multi_table[, Cum.Sum := cumsum(multi), by=data_all_multi_table[,1]]
+  data_all_multi_table_cum<-as.data.frame(data_all_multi_table_cum)
+  
+  
+  
+  data_final_dep<-data_all_multi_table_cum[data_all_multi_table_cum[,11]==data_all_multi_table_cum[,12],]
+  
+  #time-dep final data :data_final_dep#
+  data_final_dep[,5]<-ifelse(data_final_dep[,4]<=data_final_dep[,3],1,0)
+  data_final_dep[,5][is.na(data_final_dep[,5])] <- 0
+  
+  
+  #cox-data : cox_data_last#
+  cox_data<-data_final_dep
+  cox_data_last<-aggregate(cox_data[,1:12],by=list(cox_data[,1]),FUN=tail, n=1)
+  cox_data_last[,12]<-ifelse(cox_data_last[,12]==0,10, cox_data_last[,12])
+  
+  
+  
+  
+  #landmark data : land_data5 & land_data7#
+  
+  land_data5<-cox_data_last
+  land_data5<-land_data5[!(land_data5[,12]<land1),]
+  land_data5[,6]<-ifelse(land_data5[,5]<=land1 & !is.na(land_data5[,5]) ,1,0) 
+  land_data5[,7]<-ifelse(land_data5[,6]==1 & !is.na(land_data5[,5]) ,(land1-land_data5[,5])*0.5,0)
+  
+  land_data5[,8]<-ifelse(land_data5[,7]<low_q & land_data5[,7]>0,1,0)
+  land_data5[,9]<-ifelse(land_data5[,7]>=low_q & land_data5[,7]<high_q,1,0)
+  land_data5[,10]<-ifelse(land_data5[,7]>=high_q,1,0)
+  
+  
+  land_data7<-cox_data_last
+  land_data7<-land_data7[!(land_data7[,12]<land2),]
+  land_data7[,6]<-ifelse(land_data7[,5]<=land2 & !is.na(land_data7[,5]) ,1,0) 
+  land_data7[,7]<-ifelse(land_data7[,6]==1 & !is.na(land_data7[,5]) ,(land2-land_data7[,5])*0.5,0)
+  
+  land_data7[,8]<-ifelse(land_data7[,7]<low_q & land_data7[,7]>0,1,0)
+  land_data7[,9]<-ifelse(land_data7[,7]>=low_q & land_data7[,7]<high_q,1,0)
+  land_data7[,10]<-ifelse(land_data7[,7]>=high_q,1,0)
+  
+  
+  cox_data_last<-as.data.frame(cox_data_last)
+  data_final_dep<-as.data.frame(data_final_dep)
+  land_data5<-as.data.frame(land_data5)
+  land_data7<-as.data.frame(land_data7)
+  
+  #cox_cum#
+  fit_cox_cum<-coxph(Surv(multi,yi)~A1+A2+A3,data=cox_data_last)
+  #cox_exposure#
+  fit_cox_exp<-coxph(Surv(multi,yi)~zi_discrete,data=cox_data_last)
+  
+  
+  #time-dep cox_cum#
+  fit_dep_cum<-coxph(Surv(start,stop,yi)~A1+A2+A3,data=data_final_dep)
+  #time-dep cox_exposure#
+  fit_dep_exp<-coxph(Surv(start,stop,yi)~zi_discrete,data=data_final_dep)
+  
+  #landmark5#
+  
+  #landmark_cum#
+  fit_land_cum5<-coxph(Surv(multi,yi)~A1+A2+A3,data=land_data5)
+  #cox_exposure#
+  fit_land_exp5<-coxph(Surv(multi,yi)~zi_discrete,data=land_data5)
+  
+  #landmark7#
+  
+  #landmark_cum#
+  fit_land_cum7<-coxph(Surv(multi,yi)~A1+A2+A3,data=land_data7)
+  #cox_exposure#
+  fit_land_exp7<-coxph(Surv(multi,yi)~zi_discrete,data=land_data7)
+  
+  
+  
+  coeffs1 <- coef(summary(fit_cox_cum))
+  coeffs2<- coef(summary(fit_cox_exp))
+  coeffs3 <- coef(summary(fit_dep_cum))
+  coeffs4 <- coef(summary(fit_dep_exp))
+  coeffs5 <- coef(summary(fit_land_cum5))
+  coeffs6 <- coef(summary(fit_land_exp5))
+  coeffs7 <- coef(summary(fit_land_cum7))
+  coeffs8 <- coef(summary(fit_land_exp7))
+  
+  g1.value1<-c(coeffs1[1,5],coeffs1[1,1],coeffs1[1,2])
+  g2.value1<-c(coeffs1[2,5],coeffs1[2,1],coeffs1[2,2])
+  g3.value1<-c(coeffs1[3,5],coeffs1[3,1],coeffs1[3,2])
+  
+  g1.value2<-c(coeffs2[1,5],coeffs2[1,1],coeffs2[1,2])
+  
+  g1.value3<-c(coeffs3[1,5],coeffs3[1,1],coeffs3[1,2])
+  g2.value3<-c(coeffs3[2,5],coeffs3[2,1],coeffs3[2,2])
+  g3.value3<-c(coeffs3[3,5],coeffs3[3,1],coeffs3[3,2])
+  
+  g1.value4<-c(coeffs4[1,5],coeffs4[1,1],coeffs4[1,2])
+  
+  g1.value5<-c(coeffs5[1,5],coeffs5[1,1],coeffs5[1,2])
+  g2.value5<-c(coeffs5[2,5],coeffs5[2,1],coeffs5[2,2])
+  g3.value5<-c(coeffs5[3,5],coeffs5[3,1],coeffs5[3,2])
+  
+  g1.value6<-c(coeffs6[1,5],coeffs6[1,1],coeffs6[1,2])
+  
+  g1.value7<-c(coeffs7[1,5],coeffs7[1,1],coeffs7[1,2])
+  g2.value7<-c(coeffs7[2,5],coeffs7[2,1],coeffs7[2,2])
+  g3.value7<-c(coeffs7[3,5],coeffs7[3,1],coeffs7[3,2])
+  
+  g1.value8<-c(coeffs8[1,5],coeffs8[1,1],coeffs8[1,2])
+  
+  land_n1_5<-nrow(land_data5[land_data5$A1==1,])
+  land_n2_5<-nrow(land_data5[land_data5$A2==1,])
+  land_n3_5<-nrow(land_data5[land_data5$A3==1,])
+  land_n0_5<-nrow(land_data5[land_data5$A1==0 & land_data5$A2==0 & land_data5$A3==0,])
+  
+  land_n1_7<-nrow(land_data7[land_data7$A1==1,])
+  land_n2_7<-nrow(land_data7[land_data7$A2==1,])
+  land_n3_7<-nrow(land_data7[land_data7$A3==1,])
+  land_n0_7<-nrow(land_data7[land_data7$A1==0 & land_data7$A2==0 & land_data7$A3==0,])
+  
+  mat1[i,]<-c(g1.value1,g2.value1,g3.value1)
+  mat2[i,]<-c(g1.value2)
+  mat3[i,]<-c(g1.value3,g2.value3,g3.value3)
+  mat4[i,]<-c(g1.value4)
+  
+  mat5[i,]<-c(g1.value5,g2.value5,g3.value5)
+  mat6[i,]<-c(g1.value6)
+  
+  mat7[i,]<-c(g1.value7,g2.value7,g3.value7)
+  mat8[i,]<-c(g1.value8)
+  
+  
+  
+  mat_land5[i,]<-c(land_n1_5,land_n2_5,land_n3_5,land_n0_5)
+  mat_land7[i,]<-c(land_n1_7,land_n2_7,land_n3_7,land_n0_7)
+  
+  i<-i+1
+  
+}
+
+write.csv(mat1, "E:\\simul_aspirin_170124\\setting3_alternative\\cox_cum_170124.csv")
+write.csv(mat2, "E:\\simul_aspirin_170124\\setting3_alternative\\cox_exp_170124.csv")
+write.csv(mat3, "E:\\simul_aspirin_170124\\setting3_alternative\\dep_cum_170124.csv")
+write.csv(mat4, "E:\\simul_aspirin_170124\\setting3_alternative\\dep_exp_170124.csv")
+write.csv(mat5, "E:\\simul_aspirin_170124\\setting3_alternative\\land_cum_5_170124.csv")
+write.csv(mat6, "E:\\simul_aspirin_170124\\setting3_alternative\\land_exp_5_170124.csv")
+write.csv(mat7, "E:\\simul_aspirin_170124\\setting3_alternative\\land_cum_7_170124.csv")
+write.csv(mat8, "E:\\simul_aspirin_170124\\setting3_alternative\\land_exp_7_170124.csv")
+write.csv(mat_land5, "E:\\simul_aspirin_170124\\setting3_alternative\\n_land_5_170124.csv")
+write.csv(mat_land7, "E:\\simul_aspirin_170124\\setting3_alternative\\n_land_7_170124.csv")
